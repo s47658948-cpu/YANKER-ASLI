@@ -1,0 +1,12 @@
+<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8">
+<title>YANKER API Health</title>
+<style>body{font-family:Tahoma;padding:30px;background:#101522;color:white}pre{white-space:pre-wrap;background:#182238;padding:18px;border-radius:10px}</style>
+<h2>تست API یانکر</h2><pre id="x">در حال بررسی...</pre>
+<script>
+fetch('/.netlify/functions/api?action=health')
+.then(async r=>{
+ const t=await r.text();
+ document.getElementById('x').textContent='HTTP '+r.status+'\n'+t;
+})
+.catch(e=>document.getElementById('x').textContent='ERROR\n'+e);
+</script>

@@ -1,0 +1,7 @@
+<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><title>YANKER API Test</title>
+<body style="font-family:Tahoma;padding:30px"><h2>تست اتصال پنل مدیریت</h2><pre id="o">در حال تست...</pre>
+<script>
+fetch('/.netlify/functions/api?action=members').then(async r=>{
+ const t=await r.text(); document.getElementById('o').textContent='HTTP '+r.status+'\n'+t;
+}).catch(e=>document.getElementById('o').textContent='ERROR\n'+e);
+</script></body></html>
