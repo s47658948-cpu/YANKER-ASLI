@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<meta charset="utf-8">
+<title>تست ورود عضو</title>
+<body style="font-family:Tahoma;max-width:700px;margin:40px auto">
+<h2>تست ورود عضو</h2>
+<p>این صفحه فقط برای تست API است.</p>
+<input id="u" placeholder="نام کاربری"><br><br>
+<input id="p" type="password" placeholder="رمز عبور"><br><br>
+<button onclick="go()">ورود</button>
+<pre id="o"></pre>
+<script>
+async function go(){
+  const r=await fetch('/.netlify/functions/api?action=member-login',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:u.value,password:p.value})
+  });
+  o.textContent='HTTP '+r.status+'\n'+await r.text();
+}
+</script>
+</body>
+</html>
