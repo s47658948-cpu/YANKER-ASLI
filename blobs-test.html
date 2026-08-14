@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<meta charset="utf-8">
+<title>YANKER Blobs Test</title>
+<body style="font-family:sans-serif;max-width:900px;margin:40px auto">
+<h2>تست Netlify Blobs</h2>
+<pre id="out">در حال تست...</pre>
+<script>
+fetch("/.netlify/functions/api?action=blobs-test")
+.then(async r => {
+  const text = await r.text();
+  document.getElementById("out").textContent = "HTTP " + r.status + "\n\n" + text;
+})
+.catch(e => document.getElementById("out").textContent = "NETWORK ERROR\n\n" + e);
+</script>
+</body>
+</html>
