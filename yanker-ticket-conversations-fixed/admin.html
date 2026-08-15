@@ -1,0 +1,229 @@
+<!doctype html><html lang="fa" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YANKER — پنل مدیریت</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#060a12;color:#edf2ff;font-family:Tahoma,Arial,sans-serif}.wrap{max-width:1400px;margin:auto;padding:24px}
+.card{background:#0f1727;border:1px solid #263653;border-radius:18px;padding:20px;margin:14px 0}.login{max-width:430px;margin:12vh auto}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.stat b{display:block;font-size:30px;margin-top:7px}.muted{color:#93a2c1}
+input,select{width:100%;padding:11px;margin-top:7px;border:1px solid #2b3d5e;background:#080e19;color:#fff;border-radius:10px}label{display:block;margin:12px 0}
+.btn{padding:10px 14px;border:0;border-radius:10px;color:#fff;background:#2a3a59;cursor:pointer}.primary{background:#315eff}.success{background:#14603e}.danger{background:#7a2036}.ghost{background:transparent;border:1px solid #30415f}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.table{overflow:auto}table{width:100%;min-width:950px;border-collapse:collapse}th,td{text-align:right;padding:13px;border-bottom:1px solid #202d45}
+.badge{display:inline-block;padding:5px 9px;border-radius:99px;font-size:12px}.pending{background:#594713;color:#ffd56a}.approved{background:#123d2c;color:#70e0ad}.rejected{background:#521b2d;color:#ff8ca7}
+.admin-ticket-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.admin-ticket-form label{margin:0}.admin-ticket-form textarea{grid-column:1/-1;min-height:130px;padding:11px;margin-top:7px;border:1px solid #2b3d5e;background:#080e19;color:#fff;border-radius:10px;width:100%;resize:vertical}.admin-ticket-form button{justify-self:start}.notice{padding:12px;border-radius:10px;background:#14223b;margin-top:10px}.err{background:#4e1829}.hidden{display:none}@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}
+</style></head><body><div class="wrap">
+<div id="login" class="login card"><h1>YANKER / ADMIN</h1><p class="muted">مدیریت واقعی درخواست‌های عضویت</p>
+<form id="loginForm" autocomplete="on"><label>نام کاربری<input name="username" value="owner" autocomplete="username" autocapitalize="none" spellcheck="false" required></label><label>رمز عبور<input name="password" type="password" autocomplete="current-password" required></label><button type="submit" class="btn primary" style="width:100%">ورود به پنل</button></form><div id="loginMsg"></div></div>
+<div id="panel" class="hidden"><div class="row"><div><h1>پنل مدیریت YANKER</h1><p class="muted">درخواست‌ها مستقیماً از سرور خوانده می‌شوند.</p></div><button id="logoutBtn" type="button" class="btn ghost">خروج</button></div>
+<div id="stats" class="grid"></div>
+<div class="card"><div class="row"><h2>درخواست‌های عضویت</h2><button id="refreshBtn" type="button" class="btn ghost">↻ بروزرسانی</button></div><div id="requests" class="table"></div></div>
+<div class="card"><h2>اعضای رسمی</h2><div id="members" class="table"></div></div>
+<div class="card"><div class="row"><h2>اطلاعیه‌ها</h2><button id="newAnnouncement" type="button" class="btn primary">+ اطلاعیه جدید</button></div><div id="announcementForm" class="hidden"><label>عنوان<input id="annTitle"></label><label>متن<textarea id="annBody" style="width:100%;min-height:120px;padding:11px;margin-top:7px;border:1px solid #2b3d5e;background:#080e19;color:#fff;border-radius:10px"></textarea></label><button id="saveAnnouncement" class="btn success">انتشار</button></div><div id="announcements" class="table"></div></div>
+<div class="card ticket-admin-compose"><div class="row"><div><h2>ارسال تیکت برای عضو</h2><p class="muted">مدیریت می‌تواند مستقیماً یک گفتگوی جدید برای عضو ایجاد کند.</p></div><span class="badge answered">ADMIN → MEMBER</span></div><div class="admin-ticket-form"><label>عضو<select id="ticketMember"></select></label><label>موضوع<input id="ticketSubject" maxlength="120" placeholder="موضوع پیام"></label><label>متن تیکت<textarea id="ticketBody" maxlength="3000" placeholder="متن پیام برای عضو..."></textarea></label><button id="sendMemberTicket" type="button" class="btn primary">ارسال تیکت به عضو</button></div></div><div class="card"><div class="row"><div><h2>تیکت‌های کاربران</h2><p class="muted">پاسخ‌ها و گفتگوها به‌صورت دائمی در Supabase ذخیره می‌شوند.</p></div><button id="refreshTickets" type="button" class="btn ghost">↻ بروزرسانی</button></div><div id="tickets" class="table"></div></div></div></div>
+<script>
+(function(){
+"use strict";
+const API="/.netlify/functions/api";
+let token=localStorage.getItem("yanker_admin_token")||"";
+
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(action, method="GET", body=null){
+  const headers={"Accept":"application/json"};
+  if(body!==null) headers["Content-Type"]="application/json";
+  if(token) headers["Authorization"]="Bearer "+token;
+
+  let response;
+  try{
+    response=await fetch(API+"?action="+encodeURIComponent(action),{
+      method,headers,body:body===null?undefined:JSON.stringify(body),
+      credentials:"same-origin"
+    });
+  }catch(e){
+    throw new Error("اتصال به سرور برقرار نشد. اگر سایت تازه Deploy شده، یک بار Deploy را دوباره انجام بده.");
+  }
+
+  const raw=await response.text();
+  let data={};
+  try{ data=raw?JSON.parse(raw):{} }catch(e){
+    throw new Error("پاسخ سرور نامعتبر است. احتمالاً Netlify Function هنوز فعال نشده.");
+  }
+
+  if(!response.ok) throw new Error(data.error||("خطای سرور: "+response.status));
+  return data;
+}
+
+function showPanel(){
+  $("login").classList.add("hidden");
+  $("panel").classList.remove("hidden");
+}
+
+function showLogin(){
+  $("panel").classList.add("hidden");
+  $("login").classList.remove("hidden");
+}
+
+function message(text,error=true){
+  $("loginMsg").innerHTML='<div class="notice '+(error?"err":"")+'">'+esc(text)+'</div>';
+}
+
+async function load(){
+  try{
+    const [s,r,m,a,t]=await Promise.all([
+      api("stats"),api("requests"),api("members"),api("announcements"),api("tickets-admin")
+    ]);
+
+    showPanel();
+
+    $("stats").innerHTML=[
+      ["کل درخواست‌ها",s.stats.totalRequests],
+      ["در انتظار",s.stats.pending],
+      ["تأیید شده",s.stats.approved],
+      ["اعضای رسمی",s.stats.members]
+    ].map(x=>'<div class="card stat"><span class="muted">'+x[0]+'</span><b>'+x[1]+'</b></div>').join("");
+
+    const badge=(status)=>{
+      const names={pending:"در انتظار",approved:"تأیید شده",rejected:"رد شده"};
+      return '<span class="badge '+status+'">'+(names[status]||status)+'</span>';
+    };
+
+    $("requests").innerHTML=r.requests.length
+      ? '<table><thead><tr><th>نام</th><th>کاربر</th><th>Discord</th><th>سن</th><th>Play Time</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>'
+        +r.requests.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.username)+'</td><td>'+esc(x.discord)+'</td><td>'+esc(x.cityAge)+' / '+esc(x.realAge)+'</td><td>'+esc(x.playtime)+'</td><td>'+badge(x.status)+'</td><td>'
+        +(x.status==="pending"
+          ? '<button class="btn success review-approve" data-id="'+esc(x.id)+'">تأیید</button> <button class="btn danger review-reject" data-id="'+esc(x.id)+'">رد</button> '
+          : 'بررسی شده ')
+        +'<button class="btn danger request-delete" data-id="'+esc(x.id)+'">حذف</button>'
+        +'</td></tr>').join("")
+        +'</tbody></table>'
+      : '<div class="notice">درخواستی وجود ندارد.</div>';
+
+    $("members").innerHTML=m.members.length
+      ? '<table><thead><tr><th>نام</th><th>کاربر</th><th>Discord</th><th>رتبه</th><th>عملیات</th></tr></thead><tbody>'
+        +m.members.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.username)+'</td><td>'+esc(x.discord)+'</td><td><select class="rank-select" data-id="'+esc(x.id)+'">'
+        +["Recruit","Member","Enforcer","Officer","Co-Owner","Owner"].map(rank=>'<option '+(x.rank===rank?"selected":"")+'>'+rank+'</option>').join("")
+        +'</select></td><td><button class="btn danger member-delete" data-id="'+esc(x.id)+'">حذف</button></td></tr>').join("")
+        +'</tbody></table>'
+      : '<div class="notice">هنوز عضوی تأیید نشده است.</div>';
+
+    document.querySelectorAll(".review-approve").forEach(b=>b.onclick=()=>review(b.dataset.id,"approve"));
+    document.querySelectorAll(".review-reject").forEach(b=>b.onclick=()=>review(b.dataset.id,"reject"));
+    document.querySelectorAll(".request-delete").forEach(b=>b.onclick=()=>deleteRequest(b.dataset.id));
+    document.querySelectorAll(".rank-select").forEach(s=>s.onchange=()=>rank(s.dataset.id,s.value));
+    document.querySelectorAll(".member-delete").forEach(b=>b.onclick=()=>del(b.dataset.id));
+
+    $("ticketMember").innerHTML=(m.members||[]).map(x=>'<option value="'+esc(x.username)+'">'+esc(x.name)+' — @'+esc(x.username)+'</option>').join('') || '<option value="">عضوی وجود ندارد</option>';
+    $("sendMemberTicket").disabled=!(m.members||[]).length;
+
+    $("announcements").innerHTML=(a.announcements||[]).length ? '<table><thead><tr><th>عنوان</th><th>متن</th><th>زمان</th><th>عملیات</th></tr></thead><tbody>'+(a.announcements||[]).map(x=>'<tr><td>'+esc(x.title)+'</td><td>'+esc(x.body)+'</td><td>'+esc(new Date(x.date).toLocaleString("fa-IR"))+'</td><td><button class="btn danger ann-del" data-id="'+esc(x.id)+'">حذف</button></td></tr>').join('')+'</tbody></table>' : '<div class="notice">اطلاعیه‌ای وجود ندارد.</div>';
+    document.querySelectorAll(".ann-del").forEach(b=>b.onclick=()=>deleteAnnouncement(b.dataset.id));
+
+    $("tickets").innerHTML=(t.tickets||[]).length ? (t.tickets||[]).map(x=>'<div class="card"><div class="row"><b>'+esc(x.subject)+'</b><span class="badge '+esc(x.status)+'">'+esc(x.status)+'</span></div><div class="muted">'+esc(x.name)+' · @'+esc(x.username)+'</div><div style="margin-top:10px">'+x.messages.map(m=>'<div class="notice"><b>'+esc(m.sender==="admin"?"مدیریت":m.senderName)+'</b><div>'+esc(m.body)+'</div></div>').join('')+'</div><button class="btn success ticket-reply" data-id="'+esc(x.id)+'">پاسخ</button> '+(x.status!=="closed"?'<button class="btn danger ticket-close" data-id="'+esc(x.id)+'">بستن</button>':'')+' <button class="btn danger ticket-del" data-id="'+esc(x.id)+'">حذف</button></div>').join('') : '<div class="notice">تیکتی وجود ندارد.</div>';
+    document.querySelectorAll(".ticket-reply").forEach(b=>b.onclick=()=>replyTicket(b.dataset.id));
+    document.querySelectorAll(".ticket-close").forEach(b=>b.onclick=()=>closeTicket(b.dataset.id));
+    document.querySelectorAll(".ticket-del").forEach(b=>b.onclick=()=>deleteTicket(b.dataset.id));
+
+  }catch(e){
+    if(token){
+      localStorage.removeItem("yanker_admin_token");
+      token="";
+      showLogin();
+      message(e.message,true);
+    }else{
+      showLogin();
+      message(e.message,true);
+    }
+  }
+}
+
+async function login(event){
+  event.preventDefault();
+
+  const form=event.currentTarget;
+  const username=form.elements.username.value.trim();
+  const password=form.elements.password.value;
+
+  if(!username||!password){
+    message("نام کاربری و رمز عبور را وارد کنید.",true);
+    return;
+  }
+
+  const button=form.querySelector("button[type=submit],button");
+  if(button) { button.disabled=true; button.textContent="در حال ورود..."; }
+
+  try{
+    const data=await api("login","POST",{username,password});
+    if(!data.token) throw new Error("سرور توکن ورود ارسال نکرد.");
+
+    token=data.token;
+    localStorage.setItem("yanker_admin_token",token);
+    message("ورود موفق بود.",false);
+    await load();
+  }catch(e){
+    token="";
+    localStorage.removeItem("yanker_admin_token");
+    message(e.message,true);
+  }finally{
+    if(button){ button.disabled=false; button.textContent="ورود به پنل"; }
+  }
+}
+
+async function review(id,decision){
+  if(!confirm(decision==="approve"?"این درخواست تأیید شود؟":"این درخواست رد شود؟")) return;
+  try{ await api("review","POST",{id,decision}); await load(); }
+  catch(e){ alert(e.message); }
+}
+
+async function deleteRequest(id){
+  if(!confirm("این درخواست عضویت برای همیشه حذف شود؟")) return;
+  try{ await api("request-delete","POST",{id}); await load(); }
+  catch(e){ alert(e.message); }
+}
+
+async function rank(id,value){
+  try{ await api("member-rank","POST",{id,rank:value}); await load(); }
+  catch(e){ alert(e.message); }
+}
+
+async function del(id){
+  if(!confirm("این عضو حذف شود؟")) return;
+  try{ await api("member-delete","POST",{id}); await load(); }
+  catch(e){ alert(e.message); }
+}
+
+async function deleteAnnouncement(id){ if(!confirm("این اطلاعیه حذف شود؟"))return; try{await api("announcement-delete","POST",{id}); await load();}catch(e){alert(e.message);} }
+async function saveAnnouncement(){ const title=$("annTitle").value.trim(), body=$("annBody").value.trim(); if(!title||!body)return; try{await api("announcement-create","POST",{title,body}); $("annTitle").value="";$("annBody").value="";$("announcementForm").classList.add("hidden");await load();}catch(e){alert(e.message);} }
+async function replyTicket(id){ const message=prompt("پاسخ مدیریت:"); if(!message||!message.trim())return; try{await api("ticket-reply","POST",{id,message:message.trim()});await load();}catch(e){alert(e.message);} }
+async function closeTicket(id){ try{await api("ticket-close","POST",{id});await load();}catch(e){alert(e.message);} }
+async function deleteTicket(id){ if(!confirm("این تیکت حذف شود؟"))return; try{await api("ticket-delete","POST",{id});await load();}catch(e){alert(e.message);} }
+async function sendMemberTicket(){
+  const username=$("ticketMember").value;
+  const subject=$("ticketSubject").value.trim();
+  const message=$("ticketBody").value.trim();
+  if(!username||!subject||!message){ alert("عضو، موضوع و متن را کامل کنید."); return; }
+  const btn=$("sendMemberTicket"); btn.disabled=true; btn.textContent="در حال ارسال...";
+  try{ await api("ticket-create-admin","POST",{username,subject,message}); $("ticketSubject").value=""; $("ticketBody").value=""; await load(); }
+  catch(e){ alert(e.message); btn.disabled=false; btn.textContent="ارسال تیکت به عضو"; }
+}
+
+function logout(){
+  localStorage.removeItem("yanker_admin_token");
+  token="";
+  showLogin();
+  $("loginMsg").innerHTML="";
+}
+
+document.addEventListener("DOMContentLoaded",function(){
+  $("loginForm").addEventListener("submit",login);
+  $("logoutBtn")?.addEventListener("click",logout);
+  $("refreshBtn")?.addEventListener("click",load);
+  $("refreshTickets")?.addEventListener("click",load);
+  $("newAnnouncement")?.addEventListener("click",()=>$("announcementForm").classList.toggle("hidden"));
+  $("saveAnnouncement")?.addEventListener("click",saveAnnouncement);
+  $("sendMemberTicket")?.addEventListener("click",sendMemberTicket);
+
+  if(token) load();
+  else showLogin();
+});
+})();
+</script></body></html>
