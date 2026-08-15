@@ -288,7 +288,7 @@ tr:last-child td{border-bottom:none;}
 
 /* FOOTER */
 .footer{border-top:1px solid var(--border);padding:48px 0 32px;margin-top:40px;}
-.footer-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:32px;margin-bottom:36px;}
+.footer-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:32px;margin-bottom:36px;}
 @media(max-width:768px){.footer-grid{grid-template-columns:1fr 1fr;}}
 .footer h4{font-family:var(--font-d);font-size:13px;letter-spacing:1.5px;color:var(--text-faint);margin:0 0 14px;}
 .footer a{display:block;font-size:13.5px;color:var(--text-dim);margin-bottom:10px;transition:.2s;}
@@ -615,16 +615,39 @@ async function handleRegister(e){
 
 async function handleLogin(e){
   e.preventDefault();
-  const f = e.target;
-  const username = f.username.value.trim().toLowerCase();
-  const password = f.password.value;
-  const hash = await sha256(password);
-  const u = STATE.users.find(u=>u.username===username);
-  if(!u || u.passwordHash !== hash){ STATE.authError = "نام کاربری یا رمز عبور اشتباه است."; render(); return; }
-  STATE.user = u;
-  await setJSON("yanker_session", false, { username });
-  nav("profile");
-  refreshMyStatus();
+  const f=e.target;
+  const username=f.username.value.trim().toLowerCase();
+  const password=f.password.value;
+  const hash=await sha256(password);
+  const u=STATE.users.find(u=>u.username===username);
+  if(u && u.passwordHash===hash){
+    STATE.user=u;
+    await setJSON("yanker_session", false, {username});
+    nav("profile");
+    await refreshMyStatus();
+    return;
+  }
+  try{
+    const r=await yankerApi("user-login","POST",{username,password});
+    if(r?.user){
+      STATE.user={id:r.user.username,username:r.user.username,displayName:r.user.displayName,role:r.user.role,passwordHash:hash,createdAt:Date.now()};
+      STATE.users=[...STATE.users.filter(x=>x.username!==username),STATE.user];
+      if(r.request){
+        STATE.requests=[{id:r.request.id,username:r.request.username,displayName:r.request.name,discord:r.request.discord,cityAge:r.request.cityAge,realAge:r.request.realAge,playtime:r.request.playtime,reason:r.request.reason,status:r.request.status,createdAt:r.request.createdAt,reviewedBy:r.request.reviewedBy,reviewedAt:r.request.reviewedAt}];
+      }
+      if(r.member){
+        const m={id:r.member.id,name:r.member.name,username:r.member.username,rank:r.member.rank||"Recruit",status:r.member.status||"online",joinedAt:r.member.joinedAt,seed:r.member.name,userId:r.member.username};
+        STATE.members=[m,...STATE.members.filter(x=>x.username!==m.username)];
+      }
+      await saveUsers();
+      await setJSON("yanker_session",false,{username});
+      nav("profile");
+      await refreshMyStatus();
+      return;
+    }
+  }catch(err){ console.warn("persistent login failed",err); }
+  STATE.authError="نام کاربری یا رمز عبور اشتباه است.";
+  render();
 }
 
 async function handleLogout(){
@@ -847,11 +870,6 @@ function footer(){
         </div>
         <div><h4>حساب کاربری</h4>
           <a href="#/login">ورود</a><a href="#/register">ثبت‌نام</a><a href="#/profile">پروفایل</a>
-        </div>
-        <div><h4>سرور</h4>
-          <a href="javascript:void(0)">Sunset City FiveM</a>
-          <a href="javascript:void(0)">Discord</a>
-          <a href="javascript:void(0)">پشتیبانی</a>
         </div>
       </div>
       <div class="footer-bottom">
@@ -1188,9 +1206,59 @@ function viewProfile(){
 }
 
 function viewTickets(){
-  const tickets=STATE.tickets||[], tab=STATE.ticketUserTab||"open"; const open=tickets.filter(t=>t.status!=="closed"), closed=tickets.filter(t=>t.status==="closed"), visible=tab==="closed"?closed:open; const cooldown=Math.max(0,Math.ceil((ticketCooldownUntil-Date.now())/1000));
-  return `<div class="ticket-page"><div class="ticket-hero wrap"><div><div class="section-eyebrow">YANKER SUPPORT CENTER</div><h2 class="ticket-title">مرکز پشتیبانی</h2><p class="ticket-subtitle">تیکت‌های فعال و بسته‌شده جدا شده‌اند؛ سابقه گفتگو حفظ می‌شود.</p></div><div class="ticket-orb">🎫<span>SUPPORT</span></div></div><div class="wrap"><div class="ticket-stats"><div class="ticket-stat"><b>${open.length}</b><span>فعال</span></div><div class="ticket-stat"><b>${closed.length}</b><span>بسته‌شده</span></div><div class="ticket-stat"><b>${tickets.length}</b><span>کل</span></div><div class="ticket-stat"><b>10s</b><span>فاصله ارسال</span></div></div><div class="ticket-tabs"><button class="${tab==='open'?'active':''}" onclick="STATE.ticketUserTab='open';render()">تیکت‌های فعال <b>${open.length}</b></button><button class="${tab==='closed'?'active':''}" onclick="STATE.ticketUserTab='closed';render()">تیکت‌های بسته‌شده <b>${closed.length}</b></button></div>${tab==='open'?`<div class="ticket-compose card"><div class="ticket-section-head"><div><span class="ticket-kicker">NEW REQUEST</span><h3>ایجاد تیکت جدید</h3></div><div class="ticket-icon">✦</div></div><form onsubmit="createTicket(event)" class="ticket-form"><label>موضوع<input name="subject" maxlength="120" required></label><label>پیام<textarea name="message" maxlength="3000" required></textarea></label><div class="ticket-form-foot"><span class="ticket-note">⏱️ بعد از هر ارسال، ۱۰ ثانیه فاصله لازم است.</span><button class="btn btn-primary ticket-submit" type="submit" ${cooldown?'disabled':''}>${cooldown?`ارسال مجدد تا ${cooldown} ثانیه`:'ارسال تیکت'}</button></div></form></div>`:""}<div class="ticket-list" style="margin-top:22px"><div class="ticket-section-head"><div><span class="ticket-kicker">MY CONVERSATIONS</span><h3>${tab==='closed'?'تیکت‌های بسته‌شده':'تیکت‌های فعال'}</h3></div><button class="btn btn-sm btn-ghost" onclick="refreshTickets().then(render)">↻</button></div>${visible.length?visible.map(t=>`<div class="ticket-card ${t.status==='answered'?'is-answered':''} ${t.status==='closed'?'is-closed':''}"><div class="ticket-card-top"><div><div class="ticket-subject">${esc(t.subject)}</div><div class="hint">${fmtDate(t.updatedAt)}</div></div><span class="ticket-status ${t.status}">${t.status==='closed'?'بسته':t.status==='answered'?'پاسخ مدیریت':'در انتظار پاسخ'}</span></div><div class="ticket-thread">${t.messages.map(m=>`<div class="ticket-message ${m.sender==='admin'?'from-admin':'from-user'}"><div class="ticket-avatar">${m.sender==='admin'?'Y':'شما'}</div><div class="ticket-bubble"><div class="ticket-meta"><b>${esc(m.sender==='admin'?'مدیریت':m.senderName)}</b><small>${fmtDate(m.createdAt)}</small></div><div>${esc(m.body)}</div></div></div>`).join('')}</div>${t.status!=='closed'?`<button class="btn btn-sm btn-ghost" onclick="closeOwnTicket('${t.id}')">✓ بستن تیکت</button>`:`<span class="hint">این تیکت بسته شده؛ سابقه گفتگو حفظ شده است.</span>`}</div>`).join(''):`<div class="ticket-empty"><div class="ticket-empty-icon">◈</div><h3>${tab==='closed'?'تیکت بسته‌شده‌ای ندارید':'تیکت فعالی ندارید'}</h3></div>`}</div></div></div>`;
+  if(!STATE.user) return `<div class="center-hint"><p>برای ارتباط با مدیریت ابتدا وارد شوید.</p><button class="btn btn-primary" onclick="nav('login')">ورود</button></div>`;
+  const tickets=STATE.tickets||[];
+  const tab=STATE.ticketUserTab||"open";
+  const open=tickets.filter(t=>t.status!=='closed');
+  const closed=tickets.filter(t=>t.status==='closed');
+  const visible=tab==='closed'?closed:open;
+  const answeredCount=tickets.filter(t=>t.status==='answered').length;
+  const cooldown=Math.max(0,Math.ceil((ticketCooldownUntil-Date.now())/1000));
+  return `<div class="ticket-page">
+    <div class="ticket-hero wrap">
+      <div><div class="section-eyebrow">YANKER SUPPORT CENTER</div><h2 class="ticket-title">مرکز پشتیبانی اختصاصی</h2><p class="ticket-subtitle">ارتباط مستقیم و مرتب با مدیریت؛ هر موضوع را در یک تیکت جداگانه پیگیری کن.</p></div>
+      <div class="ticket-orb">🎫<span>SUPPORT</span></div>
+    </div>
+    <div class="wrap">
+      <div class="ticket-stats">
+        <div class="ticket-stat"><b>${tickets.length}</b><span>کل تیکت‌ها</span></div>
+        <div class="ticket-stat"><b>${open.length}</b><span>باز</span></div>
+        <div class="ticket-stat"><b>${answeredCount}</b><span>پاسخ داده شده</span></div>
+        <div class="ticket-stat"><b>${closed.length}</b><span>بسته‌شده</span></div>
+      </div>
+      <div class="ticket-tabs">
+        <button class="${tab==='open'?'active':''}" onclick="STATE.ticketUserTab='open';render()">گفتگوهای فعال <b>${open.length}</b></button>
+        <button class="${tab==='closed'?'active':''}" onclick="STATE.ticketUserTab='closed';render()">تیکت‌های بسته‌شده <b>${closed.length}</b></button>
+      </div>
+      ${tab==='open'?`<div class="ticket-layout">
+        <div class="ticket-compose card">
+          <div class="ticket-section-head"><div><span class="ticket-kicker">NEW REQUEST</span><h3>ایجاد تیکت جدید</h3></div><div class="ticket-icon">✦</div></div>
+          <p class="hint">موضوع را واضح بنویس تا مدیریت سریع‌تر رسیدگی کند.</p>
+          <form onsubmit="createTicket(event)" class="ticket-form">
+            <label>موضوع تیکت<input name="subject" maxlength="120" placeholder="مثلاً: مشکل ورود به سرور" required></label>
+            <label>پیام<textarea name="message" maxlength="3000" placeholder="جزئیات درخواست یا مشکل خود را بنویسید..." required></textarea></label>
+            <div class="ticket-form-foot"><span class="ticket-note">⏱️ بعد از هر ارسال، ۱۰ ثانیه برای تیکت بعدی فاصله است.</span><button class="btn btn-primary ticket-submit" type="submit" ${cooldown?'disabled':''}>${cooldown?`ارسال مجدد تا ${cooldown} ثانیه`:'ارسال تیکت'}</button></div>
+          </form>
+        </div>
+        <div class="ticket-list">
+          <div class="ticket-section-head"><div><span class="ticket-kicker">MY CONVERSATIONS</span><h3>گفتگوهای من</h3></div><button class="btn btn-sm btn-ghost" onclick="refreshTickets().then(render)">↻</button></div>
+          ${visible.length?visible.map(t=>ticketCard(t)).join(''):`<div class="ticket-empty"><div class="ticket-empty-icon">◈</div><h3>هنوز گفتگویی ندارید</h3><p>اولین تیکتت را از پنل سمت چپ ارسال کن.</p></div>`}
+        </div>
+      </div>`:`<div class="ticket-list">
+        <div class="ticket-section-head"><div><span class="ticket-kicker">ARCHIVE</span><h3>تیکت‌های بسته‌شده</h3></div><button class="btn btn-sm btn-ghost" onclick="refreshTickets().then(render)">↻</button></div>
+        ${visible.length?visible.map(t=>ticketCard(t)).join(''):`<div class="ticket-empty"><div class="ticket-empty-icon">◈</div><h3>تیکت بسته‌شده‌ای ندارید</h3><p>تیکت‌های بسته‌شده در این بخش نگهداری می‌شوند.</p></div>`}
+      </div>`}
+    </div>
+  </div>`;
 }
+function ticketCard(t){
+  return `<div class="ticket-card ${t.status==='answered'?'is-answered':''} ${t.status==='closed'?'is-closed':''}">
+    <div class="ticket-card-top"><div><div class="ticket-subject">${esc(t.subject)}</div><div class="hint">${fmtDate(t.createdAt)}</div></div><span class="ticket-status ${t.status}">${t.status==='closed'?'بسته':t.status==='answered'?'پاسخ مدیریت':'در انتظار پاسخ'}</span></div>
+    <div class="ticket-thread">${t.messages.map(m=>`<div class="ticket-message ${m.sender==='admin'?'from-admin':'from-user'}"><div class="ticket-avatar">${m.sender==='admin'?'Y':'شما'}</div><div class="ticket-bubble"><div class="ticket-meta"><b>${esc(m.sender==='admin'?'مدیریت':m.senderName)}</b><small>${fmtDate(m.createdAt)}</small></div><div>${esc(m.body)}</div></div></div>`).join('')}</div>
+    ${t.status!=='closed'?`<button class="btn btn-sm btn-ghost" onclick="closeOwnTicket('${t.id}')">✓ بستن تیکت</button>`:`<span class="hint">این تیکت بسته شده؛ پیام‌ها و سابقه گفتگو حفظ شده‌اند.</span>`}
+  </div>`;
+}
+
 /* ---------- ADMIN ---------- */
 function viewAdmin(){
   if(!STATE.user || ROLE_LEVEL[STATE.user.role] < 2){

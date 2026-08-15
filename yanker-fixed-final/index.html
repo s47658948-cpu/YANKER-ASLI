@@ -288,7 +288,7 @@ tr:last-child td{border-bottom:none;}
 
 /* FOOTER */
 .footer{border-top:1px solid var(--border);padding:48px 0 32px;margin-top:40px;}
-.footer-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:32px;margin-bottom:36px;}
+.footer-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:32px;margin-bottom:36px;}
 @media(max-width:768px){.footer-grid{grid-template-columns:1fr 1fr;}}
 .footer h4{font-family:var(--font-d);font-size:13px;letter-spacing:1.5px;color:var(--text-faint);margin:0 0 14px;}
 .footer a{display:block;font-size:13.5px;color:var(--text-dim);margin-bottom:10px;transition:.2s;}
@@ -299,7 +299,7 @@ tr:last-child td{border-bottom:none;}
 .hint{font-size:12px;color:var(--text-faint);margin-top:8px;}
 .page-head{padding:70px 0 30px;}
 .center-hint{text-align:center;padding:70px 20px;}
-</style>
+.ticket-tabs{display:flex;gap:8px;margin:18px 0;flex-wrap:wrap}.ticket-tabs button{border:1px solid var(--border);background:rgba(8,14,25,.7);color:var(--text-dim);padding:10px 14px;border-radius:12px;cursor:pointer}.ticket-tabs button.active{background:rgba(49,94,255,.14);color:#fff;border-color:#3d5fa8}.ticket-tabs b{margin-right:6px;color:#7fa2ff}.admin-ticket-mini{cursor:pointer;border:1px solid var(--border);color:var(--text);background:var(--panel)}.admin-ticket-mini.active{border-color:#3d5fa8}</style>
 </head>
 <body>
 <div id="app"></div>
@@ -307,7 +307,11 @@ tr:last-child td{border-bottom:none;}
 <script>
 window.YANKER_API = "/.netlify/functions/api";
 async function yankerApi(action, method="GET", body=null){
-  const r = await fetch(window.YANKER_API+"?action="+encodeURIComponent(action),{
+  let url = window.YANKER_API+"?action="+encodeURIComponent(action);
+  if((action === "my-status" || action === "tickets") && typeof STATE !== "undefined" && STATE.user && STATE.user.username){
+    url += "&username=" + encodeURIComponent(STATE.user.username);
+  }
+  const r = await fetch(url,{
     method,
     headers:{"content-type":"application/json"},
     body:body ? JSON.stringify(body) : undefined
@@ -345,8 +349,11 @@ let STATE = {
   announcements: [],
   rules: [],
   activity: [],
+  tickets: [],
   loaded: false,
   adminTab: "overview",
+  ticketAdminTab: "open",
+  ticketUserTab: "open",
   authError: "",
   authNotice: "",
   joinError: "",
@@ -398,14 +405,14 @@ function logActivity(text){
 
 /* ---------- bootstrap ---------- */
 async function loadAll(){
-  const [users, members, requests, announcements, rules, activity, session] = await Promise.all([
+  const [users, localAnnouncements, rules, activity, session, apiMembers, apiAnnouncements] = await Promise.all([
     getJSON("yanker_users", true, null),
-    getJSON("yanker_members", true, null),
-    getJSON("yanker_requests", true, null),
     getJSON("yanker_announcements", true, null),
     getJSON("yanker_rules", true, null),
     getJSON("yanker_activity", true, null),
-    getJSON("yanker_session", false, null)
+    getJSON("yanker_session", false, null),
+    yankerApi("members").catch(()=>({members:[]})),
+    yankerApi("announcements").catch(()=>({announcements:[]}))
   ]);
 
   STATE.rules = rules || DEFAULT_RULES.slice();
@@ -438,26 +445,20 @@ async function loadAll(){
     }
   }
 
-  if(!members){
-    const seed = [
-      ["Kaan Yıldız","Owner"], ["Selin Kara","Co-Owner"], ["Deniz Aksoy","Officer"],
-      ["Mert Aydın","Enforcer"], ["Ece Demir","Member"], ["Baran Öztürk","Member"],
-      ["Aslı Çelik","Member"], ["Emir Şahin","Recruit"]
-    ];
-    STATE.members = seed.map((m,i)=>({
-      id: uid(), name:m[0], rank:m[1], status: i%3===0 ? "offline":"online",
-      joinedAt: Date.now() - (i+3)*86400000, seed: m[0]
-    }));
-    await setJSON("yanker_members", true, STATE.members);
-  } else { STATE.members = members; }
+  // Members are now loaded only from the real Supabase API.
+  // This removes the old demo/fake member seed and prevents stale localStorage
+  // members from appearing on the public site.
+  STATE.members = (apiMembers.members || []).map(m=>({
+    id:m.id, name:m.name, username:m.username, discord:m.discord, rank:m.rank || "Recruit",
+    status:m.status || "online", joinedAt:m.joinedAt, seed:m.name, userId:m.username
+  }));
+  try { localStorage.removeItem("yanker_members"); } catch(e) {}
 
-  if(!announcements){
-    STATE.announcements = [
-      { id: uid(), title:"بروزرسانی قلمرو نانکر", body:"مرزهای فعالیت Yanker در بخش غربی Sunset City گسترش یافت. جزئیات کامل و نقشه به‌زودی برای اعضا منتشر می‌شود.", author:"Founder", date: Date.now()-2*86400000, published:true },
-      { id: uid(), title:"شروع فصل جدید کوئست‌های روزانه", body:"از این هفته سیستم کوئست روزانه با پاداش‌های تازه فعال شده است. حداقل ۳ کوئست در روز را فراموش نکنید.", author:"Founder", date: Date.now()-6*3600000, published:true }
-    ];
-    await setJSON("yanker_announcements", true, STATE.announcements);
-  } else { STATE.announcements = announcements; }
+  // Announcements are now persisted in Supabase. Old local demo announcements are removed.
+  STATE.announcements = (apiAnnouncements.announcements || []).map(a=>({
+    id:a.id,title:a.title,body:a.body,author:a.author,date:a.date,published:a.published
+  }));
+  try { localStorage.removeItem("yanker_announcements"); } catch(e) {}
 
   STATE.activity = activity || [];
 
@@ -467,24 +468,123 @@ async function loadAll(){
   }
 
   STATE.loaded = true;
+  if(STATE.user) { setTimeout(()=>refreshMyStatus(), 0); setTimeout(()=>refreshTickets(), 0); }
+  try { window.addEventListener('hashchange', ()=>{ if(STATE.route==='tickets') refreshTickets(); }); } catch(e) {}
 }
 
 async function saveUsers(){ await setJSON("yanker_users", true, STATE.users); }
 async function saveMembers(){ await setJSON("yanker_members", true, STATE.members); }
 async function saveRequests(){ await setJSON("yanker_requests", true, STATE.requests); }
-async function saveAnnouncements(){ await setJSON("yanker_announcements", true, STATE.announcements); }
+
+async function syncMyStatus(){
+  if(!STATE.user || !STATE.user.username) return;
+  try{
+    const data = await yankerApi("my-status");
+  }catch(e){}
+}
+
+async function refreshMyStatus(){
+  if(!STATE.user || !STATE.user.username) return;
+  try{
+    const r = await yankerApi("my-status","GET",null);
+    const nextRequests = (r.requests||[]).map(x=>({
+      id:x.id, username:x.username, displayName:x.name, discord:x.discord,
+      cityAge:x.cityAge, realAge:x.realAge, playtime:x.playtime, reason:x.reason,
+      status:x.status, createdAt:x.createdAt, reviewedBy:x.reviewedBy, reviewedAt:x.reviewedAt
+    }));
+
+    const oldStatus = JSON.stringify(STATE.requests);
+    const oldRank = STATE.members.find(x=>x.username===STATE.user.username)?.rank || null;
+    STATE.requests = nextRequests;
+
+    if(r.member){
+      const m={id:r.member.id,name:r.member.name,username:r.member.username,rank:r.member.rank,status:r.member.status||"online",joinedAt:r.member.joinedAt,seed:r.member.name,userId:r.member.username};
+      STATE.members = [m, ...STATE.members.filter(x=>x.id!==m.id && x.username!==m.username)];
+      if(STATE.user.role === "user") STATE.user.role = "member";
+    }
+
+    const newRank = r.member?.rank || null;
+    const changed = oldStatus !== JSON.stringify(STATE.requests) || oldRank !== newRank;
+
+    // Never re-render the join form while the user is typing. A background
+    // status refresh must not steal focus or clear input values.
+    if(changed && STATE.route === "profile") render();
+  }catch(e){ console.warn("my-status sync failed",e); }
+}
+async function refreshTickets(){
+  if(!STATE.user || !STATE.user.username) return;
+  try{
+    const r=await yankerApi("tickets");
+    STATE.tickets=r.tickets||[];
+    const latest=STATE.tickets.reduce((max,t)=>Math.max(max,Number(t.createdAt||0)),0);
+    if(latest && Date.now()-latest<10000) ticketCooldownUntil=Math.max(ticketCooldownUntil,latest+10000);
+    return STATE.tickets;
+  }catch(e){ console.warn("ticket sync failed",e); return []; }
+}
+let ticketCooldownUntil=0;
+async function createTicket(e){
+  e.preventDefault();
+  const f=e.target, subject=f.subject.value.trim(), message=f.message.value.trim();
+  if(!subject||!message) return;
+  const button=f.querySelector('button[type="submit"]');
+  if(Date.now()<ticketCooldownUntil){ updateTicketCooldown(button); return; }
+  try{
+    await yankerApi("ticket-create","POST",{username:STATE.user.username,name:STATE.user.displayName,subject,message});
+    ticketCooldownUntil=Date.now()+10000;
+    await refreshTickets();
+    f.reset();
+    render();
+    setTimeout(()=>render(),10050);
+  }catch(err){
+    if(err?.message?.includes("ثانیه")){ const m=err.message.match(/(\d+)\s*ثانیه/); if(m) ticketCooldownUntil=Date.now()+Number(m[1])*1000; }
+    alert(err.message);
+    render();
+  }
+}
+function updateTicketCooldown(button){
+  if(!button) return;
+  const left=Math.max(0,Math.ceil((ticketCooldownUntil-Date.now())/1000));
+  button.disabled=left>0; button.textContent=left>0?`ارسال مجدد تا ${left} ثانیه`:'ارسال تیکت';
+  if(left>0) setTimeout(()=>updateTicketCooldown(button),1000);
+}
+async function closeOwnTicket(id){
+  if(!confirm("این تیکت بسته شود؟ پیام‌ها و سابقه گفتگو حفظ می‌شوند.")) return;
+  try{ await yankerApi("ticket-close-own","POST",{id,username:STATE.user.username}); await refreshTickets(); render(); }catch(e){ alert(e.message); }
+}
+async function replyTicket(id){
+  const text=prompt("پاسخ مدیریت:"); if(!text || !text.trim()) return;
+  try{ await yankerApi("ticket-reply","POST",{id,message:text.trim()}); await loadTicketsAdmin(); render(); }catch(e){ alert(e.message); }
+}
+async function closeTicket(id){
+  try{ await yankerApi("ticket-close","POST",{id}); await loadTicketsAdmin(); render(); }catch(e){ alert(e.message); }
+}
+async function deleteTicketAdmin(id){
+  if(!confirm("این تیکت و تمام پیام‌های آن برای همیشه حذف شود؟")) return;
+  try{ await yankerApi("ticket-delete","POST",{id}); await loadTicketsAdmin(); render(); }catch(e){ alert(e.message); }
+}
+async function loadTicketsAdmin(){
+  try{ const r=await yankerApi("tickets-admin"); STATE.tickets=r.tickets||[]; }catch(e){ console.warn("admin ticket sync failed",e); }
+}
+async function sendTicketToMember(e){
+  e.preventDefault();
+  const f=e.target, username=f.username.value, subject=f.subject.value.trim(), message=f.message.value.trim();
+  if(!username||!subject||!message) return;
+  try{ await yankerApi("ticket-create-admin","POST",{username,subject,message}); f.reset(); await loadTicketsAdmin(); render(); }catch(err){ alert(err.message); }
+}
+
+async function saveAnnouncements(){ return true; }
 async function saveRules(){ await setJSON("yanker_rules", true, STATE.rules); }
 
 /* ---------- nav ---------- */
 function nav(route){
   STATE.route = route;
   STATE.authError = ""; STATE.authNotice = ""; STATE.joinError="";
-  location.hash = "#" + route;
+  location.hash = "#/" + String(route).replace(/^#\/?/, "");
   window.scrollTo({top:0, behavior:"instant"});
   render();
 }
 window.addEventListener("hashchange", ()=>{
-  STATE.route = (location.hash || "#/home").replace("#","");
+  STATE.route = (location.hash || "#/home").replace(/^#\/?/, "");
   render();
 });
 
@@ -515,15 +615,39 @@ async function handleRegister(e){
 
 async function handleLogin(e){
   e.preventDefault();
-  const f = e.target;
-  const username = f.username.value.trim().toLowerCase();
-  const password = f.password.value;
-  const hash = await sha256(password);
-  const u = STATE.users.find(u=>u.username===username);
-  if(!u || u.passwordHash !== hash){ STATE.authError = "نام کاربری یا رمز عبور اشتباه است."; render(); return; }
-  STATE.user = u;
-  await setJSON("yanker_session", false, { username });
-  nav("profile");
+  const f=e.target;
+  const username=f.username.value.trim().toLowerCase();
+  const password=f.password.value;
+  const hash=await sha256(password);
+  const u=STATE.users.find(u=>u.username===username);
+  if(u && u.passwordHash===hash){
+    STATE.user=u;
+    await setJSON("yanker_session", false, {username});
+    nav("profile");
+    await refreshMyStatus();
+    return;
+  }
+  try{
+    const r=await yankerApi("user-login","POST",{username,password});
+    if(r?.user){
+      STATE.user={id:r.user.username,username:r.user.username,displayName:r.user.displayName,role:r.user.role,passwordHash:hash,createdAt:Date.now()};
+      STATE.users=[...STATE.users.filter(x=>x.username!==username),STATE.user];
+      if(r.request){
+        STATE.requests=[{id:r.request.id,username:r.request.username,displayName:r.request.name,discord:r.request.discord,cityAge:r.request.cityAge,realAge:r.request.realAge,playtime:r.request.playtime,reason:r.request.reason,status:r.request.status,createdAt:r.request.createdAt,reviewedBy:r.request.reviewedBy,reviewedAt:r.request.reviewedAt}];
+      }
+      if(r.member){
+        const m={id:r.member.id,name:r.member.name,username:r.member.username,rank:r.member.rank||"Recruit",status:r.member.status||"online",joinedAt:r.member.joinedAt,seed:r.member.name,userId:r.member.username};
+        STATE.members=[m,...STATE.members.filter(x=>x.username!==m.username)];
+      }
+      await saveUsers();
+      await setJSON("yanker_session",false,{username});
+      nav("profile");
+      await refreshMyStatus();
+      return;
+    }
+  }catch(err){ console.warn("persistent login failed",err); }
+  STATE.authError="نام کاربری یا رمز عبور اشتباه است.";
+  render();
 }
 
 async function handleLogout(){
@@ -576,6 +700,7 @@ async function handleJoinSubmit(e){
     STATE.joinSuccess = true;
     STATE.joinError = "";
     render();
+    refreshMyStatus();
   }catch(err){
     STATE.joinSuccess = false;
     STATE.joinError = err.message;
@@ -606,18 +731,23 @@ async function reviewRequest(id, approve){
 /* ---------- admin: members ---------- */
 async function removeMember(id){
   const m = STATE.members.find(m=>m.id===id);
-  STATE.members = STATE.members.filter(m=>m.id!==id);
-  await saveMembers();
-  logActivity(`عضو ${esc(m?m.name:"")} حذف شد`);
-  render();
+  if(!m) return;
+  try{
+    await yankerApi("member-delete","POST",{id});
+    STATE.members = STATE.members.filter(m=>m.id!==id);
+    logActivity(`عضو ${esc(m.name)} حذف شد`);
+    render();
+  }catch(err){ alert(err.message); }
 }
 async function changeRank(id, rank){
   const m = STATE.members.find(m=>m.id===id);
   if(!m) return;
-  m.rank = rank;
-  await saveMembers();
-  logActivity(`رتبه ${esc(m.name)} به ${esc(rank)} تغییر کرد`);
-  render();
+  try{
+    const data = await yankerApi("member-rank","POST",{id,rank});
+    m.rank = data.member.rank;
+    logActivity(`رتبه ${esc(m.name)} به ${esc(rank)} تغییر کرد`);
+    render();
+  }catch(err){ alert(err.message); }
 }
 async function addMemberManual(e){
   e.preventDefault();
@@ -643,28 +773,26 @@ async function changeUserRole(userId, role){
 let editingAnnouncementId = null;
 async function submitAnnouncement(e){
   e.preventDefault();
-  const f = e.target;
-  const title = f.title.value.trim();
-  const body = f.body.value.trim();
-  if(!title || !body) return;
-  if(editingAnnouncementId){
-    const a = STATE.announcements.find(a=>a.id===editingAnnouncementId);
-    a.title = title; a.body = body;
-    logActivity(`اطلاعیه «${esc(title)}» ویرایش شد`);
-  } else {
-    STATE.announcements.unshift({ id: uid(), title, body, author: STATE.user.displayName, date: Date.now(), published:true });
-    logActivity(`اطلاعیه جدید «${esc(title)}» منتشر شد`);
-  }
-  editingAnnouncementId = null;
-  await saveAnnouncements();
-  closeModal(); render();
+  const f=e.target, title=f.title.value.trim(), body=f.body.value.trim();
+  if(!title||!body) return;
+  try{
+    let data;
+    if(editingAnnouncementId){
+      data=await yankerApi("announcement-update","POST",{id:editingAnnouncementId,title,body});
+      const i=STATE.announcements.findIndex(a=>a.id===editingAnnouncementId);
+      if(i>=0) STATE.announcements[i]=data.announcement;
+    }else{
+      data=await yankerApi("announcement-create","POST",{title,body});
+      STATE.announcements.unshift(data.announcement);
+    }
+    editingAnnouncementId=null; logActivity(`اطلاعیه «${esc(title)}» ذخیره شد`); closeModal(); render();
+  }catch(err){ alert(err.message); }
 }
 async function deleteAnnouncement(id){
-  const a = STATE.announcements.find(a=>a.id===id);
-  STATE.announcements = STATE.announcements.filter(a=>a.id!==id);
-  await saveAnnouncements();
-  logActivity(`اطلاعیه «${esc(a?a.title:"")}» حذف شد`);
-  render();
+  const a=STATE.announcements.find(a=>a.id===id);
+  if(!confirm("این اطلاعیه حذف شود؟")) return;
+  try{ await yankerApi("announcement-delete","POST",{id}); STATE.announcements=STATE.announcements.filter(a=>a.id!==id); logActivity(`اطلاعیه «${esc(a?a.title:"")}» حذف شد`); render(); }
+  catch(err){ alert(err.message); }
 }
 
 /* ---------- admin: rules ---------- */
@@ -696,7 +824,7 @@ function closeModal(){ modalContent = null; editingAnnouncementId = null; render
 function navBar(){
   const links = [
     ["home","خانه"], ["rules","قوانین"], ["members","اعضا"],
-    ["announcements","اطلاعیه‌ها"], ["join","درخواست عضویت"]
+    ["announcements","اطلاعیه‌ها"], ["join","درخواست عضویت"], ...(STATE.user ? [["tickets","تیکت"]] : [])
   ];
   return `
   <div class="nav">
@@ -707,7 +835,7 @@ function navBar(){
       </div>
       <div class="nav-links">
         ${links.map(([r,l])=>`<a href="#/${r}" class="${STATE.route===r?'active':''}">${l}</a>`).join("")}
-        ${STATE.user && ROLE_LEVEL[STATE.user.role] >= 2 ? `<a href="#/admin" class="${STATE.route==='admin'?'active':''}">پنل مدیریت</a>` : ""}
+        ${STATE.user && ROLE_LEVEL[STATE.user.role] >= 2 ? `<a href="#/admin" class="${STATE.route==='admin'?'active':''}" onclick="event.preventDefault();nav('admin')">پنل مدیریت</a>` : ""}
       </div>
       <div class="nav-cta">
         ${STATE.user
@@ -738,15 +866,10 @@ function footer(){
           </p>
         </div>
         <div><h4>ناوبری</h4>
-          <a href="#/rules">قوانین</a><a href="#/members">اعضا</a><a href="#/announcements">اطلاعیه‌ها</a><a href="#/join">درخواست عضویت</a>
+          <a href="#/rules" onclick="event.preventDefault();nav('rules')">قوانین</a><a href="#/members" onclick="event.preventDefault();nav('members')">اعضا</a><a href="#/announcements" onclick="event.preventDefault();nav('announcements')">اطلاعیه‌ها</a><a href="#/join" onclick="event.preventDefault();nav('join')">درخواست عضویت</a>
         </div>
         <div><h4>حساب کاربری</h4>
           <a href="#/login">ورود</a><a href="#/register">ثبت‌نام</a><a href="#/profile">پروفایل</a>
-        </div>
-        <div><h4>سرور</h4>
-          <a href="javascript:void(0)">Sunset City FiveM</a>
-          <a href="javascript:void(0)">Discord</a>
-          <a href="javascript:void(0)">پشتیبانی</a>
         </div>
       </div>
       <div class="footer-bottom">
@@ -1043,7 +1166,8 @@ function viewProfile(){
     return `<div class="center-hint"><p>برای مشاهده پروفایل باید وارد شوید.</p></div>`;
   }
   const myRequests = STATE.requests.filter(r=>r.username===STATE.user.username).sort((a,b)=>b.createdAt-a.createdAt);
-  const isMember = STATE.members.some(m=>m.userId===STATE.user.username);
+  const memberRecord = STATE.members.find(m=>String(m.username||m.userId||"").toLowerCase()===STATE.user.username.toLowerCase());
+  const isMember = !!memberRecord;
 
   return `
   <div class="page-head wrap">
@@ -1056,6 +1180,7 @@ function viewProfile(){
         <div class="card"><div class="card-icon">🪪</div><h3>نام کاربری</h3><p>${esc(STATE.user.username)}</p></div>
         <div class="card"><div class="card-icon">👑</div><h3>نقش</h3><p>${ROLE_LABEL[STATE.user.role]}</p></div>
         <div class="card"><div class="card-icon">${isMember?'✅':'⏳'}</div><h3>وضعیت عضویت</h3><p>${isMember?'عضو تأییدشده Yanker':'هنوز عضو رسمی نیستید'}</p></div>
+        ${isMember ? `<div class="card"><div class="card-icon">🏅</div><h3>رتبه</h3><p>${esc(memberRecord.rank || 'Recruit')}</p></div>` : ''}
       </div>
 
       <div class="section-head"><h3 class="section-title" style="font-size:22px;">درخواست‌های عضویت من</h3></div>
@@ -1075,14 +1200,63 @@ function viewProfile(){
           </tbody>
         </table>
       </div>` : `<div class="empty-state"><div class="em-icon">📝</div>هنوز درخواستی ثبت نکرده‌اید. <br/><button class="btn btn-primary btn-sm" style="margin-top:14px;" onclick="nav('join')">ثبت درخواست عضویت</button></div>`}
+      <div class="card" style="margin-top:22px;"><h3>ارتباط با مدیریت</h3><p class="panel-sub">اگر سوال یا مشکلی دارید، از طریق تیکت با پنل مدیریت در ارتباط باشید.</p><button class="btn btn-primary btn-sm" onclick="nav('tickets')">باز کردن تیکت‌ها</button></div>
     </div>
   </div>`;
 }
 
-function statusBadge(s){
-  if(s==="approved") return `<span class="badge badge-approved">تأیید شده</span>`;
-  if(s==="rejected") return `<span class="badge badge-rejected">رد شده</span>`;
-  return `<span class="badge badge-pending">در انتظار بررسی</span>`;
+function viewTickets(){
+  if(!STATE.user) return `<div class="center-hint"><p>برای ارتباط با مدیریت ابتدا وارد شوید.</p><button class="btn btn-primary" onclick="nav('login')">ورود</button></div>`;
+  const tickets=STATE.tickets||[];
+  const tab=STATE.ticketUserTab||"open";
+  const open=tickets.filter(t=>t.status!=='closed');
+  const closed=tickets.filter(t=>t.status==='closed');
+  const visible=tab==='closed'?closed:open;
+  const answeredCount=tickets.filter(t=>t.status==='answered').length;
+  const cooldown=Math.max(0,Math.ceil((ticketCooldownUntil-Date.now())/1000));
+  return `<div class="ticket-page">
+    <div class="ticket-hero wrap">
+      <div><div class="section-eyebrow">YANKER SUPPORT CENTER</div><h2 class="ticket-title">مرکز پشتیبانی اختصاصی</h2><p class="ticket-subtitle">ارتباط مستقیم و مرتب با مدیریت؛ هر موضوع را در یک تیکت جداگانه پیگیری کن.</p></div>
+      <div class="ticket-orb">🎫<span>SUPPORT</span></div>
+    </div>
+    <div class="wrap">
+      <div class="ticket-stats">
+        <div class="ticket-stat"><b>${tickets.length}</b><span>کل تیکت‌ها</span></div>
+        <div class="ticket-stat"><b>${open.length}</b><span>باز</span></div>
+        <div class="ticket-stat"><b>${answeredCount}</b><span>پاسخ داده شده</span></div>
+        <div class="ticket-stat"><b>${closed.length}</b><span>بسته‌شده</span></div>
+      </div>
+      <div class="ticket-tabs">
+        <button class="${tab==='open'?'active':''}" onclick="STATE.ticketUserTab='open';render()">گفتگوهای فعال <b>${open.length}</b></button>
+        <button class="${tab==='closed'?'active':''}" onclick="STATE.ticketUserTab='closed';render()">تیکت‌های بسته‌شده <b>${closed.length}</b></button>
+      </div>
+      ${tab==='open'?`<div class="ticket-layout">
+        <div class="ticket-compose card">
+          <div class="ticket-section-head"><div><span class="ticket-kicker">NEW REQUEST</span><h3>ایجاد تیکت جدید</h3></div><div class="ticket-icon">✦</div></div>
+          <p class="hint">موضوع را واضح بنویس تا مدیریت سریع‌تر رسیدگی کند.</p>
+          <form onsubmit="createTicket(event)" class="ticket-form">
+            <label>موضوع تیکت<input name="subject" maxlength="120" placeholder="مثلاً: مشکل ورود به سرور" required></label>
+            <label>پیام<textarea name="message" maxlength="3000" placeholder="جزئیات درخواست یا مشکل خود را بنویسید..." required></textarea></label>
+            <div class="ticket-form-foot"><span class="ticket-note">⏱️ بعد از هر ارسال، ۱۰ ثانیه برای تیکت بعدی فاصله است.</span><button class="btn btn-primary ticket-submit" type="submit" ${cooldown?'disabled':''}>${cooldown?`ارسال مجدد تا ${cooldown} ثانیه`:'ارسال تیکت'}</button></div>
+          </form>
+        </div>
+        <div class="ticket-list">
+          <div class="ticket-section-head"><div><span class="ticket-kicker">MY CONVERSATIONS</span><h3>گفتگوهای من</h3></div><button class="btn btn-sm btn-ghost" onclick="refreshTickets().then(render)">↻</button></div>
+          ${visible.length?visible.map(t=>ticketCard(t)).join(''):`<div class="ticket-empty"><div class="ticket-empty-icon">◈</div><h3>هنوز گفتگویی ندارید</h3><p>اولین تیکتت را از پنل سمت چپ ارسال کن.</p></div>`}
+        </div>
+      </div>`:`<div class="ticket-list">
+        <div class="ticket-section-head"><div><span class="ticket-kicker">ARCHIVE</span><h3>تیکت‌های بسته‌شده</h3></div><button class="btn btn-sm btn-ghost" onclick="refreshTickets().then(render)">↻</button></div>
+        ${visible.length?visible.map(t=>ticketCard(t)).join(''):`<div class="ticket-empty"><div class="ticket-empty-icon">◈</div><h3>تیکت بسته‌شده‌ای ندارید</h3><p>تیکت‌های بسته‌شده در این بخش نگهداری می‌شوند.</p></div>`}
+      </div>`}
+    </div>
+  </div>`;
+}
+function ticketCard(t){
+  return `<div class="ticket-card ${t.status==='answered'?'is-answered':''} ${t.status==='closed'?'is-closed':''}">
+    <div class="ticket-card-top"><div><div class="ticket-subject">${esc(t.subject)}</div><div class="hint">${fmtDate(t.createdAt)}</div></div><span class="ticket-status ${t.status}">${t.status==='closed'?'بسته':t.status==='answered'?'پاسخ مدیریت':'در انتظار پاسخ'}</span></div>
+    <div class="ticket-thread">${t.messages.map(m=>`<div class="ticket-message ${m.sender==='admin'?'from-admin':'from-user'}"><div class="ticket-avatar">${m.sender==='admin'?'Y':'شما'}</div><div class="ticket-bubble"><div class="ticket-meta"><b>${esc(m.sender==='admin'?'مدیریت':m.senderName)}</b><small>${fmtDate(m.createdAt)}</small></div><div>${esc(m.body)}</div></div></div>`).join('')}</div>
+    ${t.status!=='closed'?`<button class="btn btn-sm btn-ghost" onclick="closeOwnTicket('${t.id}')">✓ بستن تیکت</button>`:`<span class="hint">این تیکت بسته شده؛ پیام‌ها و سابقه گفتگو حفظ شده‌اند.</span>`}
+  </div>`;
 }
 
 /* ---------- ADMIN ---------- */
@@ -1094,9 +1268,10 @@ function viewAdmin(){
 
   const tabs = [
     ["overview","📊","نمای کلی"],
-    ["requests","📥","درخواست‌ها"],
-    ["members","👥","اعضا"],
+    ["requests","📥","درخواست‌های عضویت"],
+    ["members","👥","اعضای رسمی"],
     ["announcements","📢","اطلاعیه‌ها"],
+    ["tickets","🎫","مرکز تیکت"],
     ["rules","📜","قوانین"],
     ["activity","🕓","لاگ فعالیت"],
   ];
@@ -1122,6 +1297,7 @@ function adminTabContent(){
     case "requests": return adminRequests();
     case "members": return adminMembers();
     case "announcements": return adminAnnouncements();
+    case "tickets": return adminTickets();
     case "rules": return adminRules();
     case "activity": return adminActivity();
     case "users": return adminUsers();
@@ -1275,6 +1451,16 @@ function announcementModal(id){
   </form>`;
 }
 
+function adminTickets(){
+  const list=(STATE.tickets||[]).slice().sort((a,b)=>b.updatedAt-a.updatedAt), tab=STATE.ticketAdminTab||"open";
+  const open=list.filter(t=>t.status!=="closed"), closed=list.filter(t=>t.status==="closed"), visible=tab==="closed"?closed:open;
+  const members=STATE.members||[];
+  return `<div class="admin-ticket-dashboard"><div class="banner admin-ticket-banner"><div><span class="ticket-kicker">SUPPORT CONTROL</span><h2 style="margin:4px 0">مرکز تیکت</h2><span class="muted">خلوت، دسته‌بندی‌شده و سریع.</span></div><button class="btn btn-sm btn-ghost" onclick="loadTicketsAdmin().then(render)">↻</button></div>
+  <div class="admin-ticket-mini-stats"><button class="admin-ticket-mini ${tab==='open'?'active':''}" onclick="STATE.ticketAdminTab='open';render()"><span>فعال</span><b>${open.length}</b></button><button class="admin-ticket-mini ${tab==='closed'?'active':''}" onclick="STATE.ticketAdminTab='closed';render()"><span>بسته‌شده</span><b>${closed.length}</b></button><div class="admin-ticket-mini"><span>کل</span><b>${list.length}</b></div></div>
+  ${tab==='open'?`<div class="card admin-send-ticket"><div class="ticket-section-head"><div><span class="ticket-kicker">DIRECT MESSAGE</span><h3>ارسال تیکت برای عضو</h3></div><div class="ticket-icon">✦</div></div><form onsubmit="sendTicketToMember(event)" class="admin-ticket-form-grid"><label>عضو<select name="username" required>${members.map(m=>`<option value="${esc(m.username||'')}">${esc(m.name)} — @${esc(m.username||'')}</option>`).join('')||'<option>عضوی وجود ندارد</option>'}</select></label><label>موضوع<input name="subject" maxlength="120" required></label><label class="full">متن<textarea name="message" maxlength="3000" required></textarea></label><button class="btn btn-primary" type="submit">ارسال به عضو</button></form></div>`:""}
+  <div class="section-head" style="margin-top:26px"><h3 class="section-title" style="font-size:22px">${tab==='closed'?'تیکت‌های بسته‌شده':'تیکت‌های فعال'}</h3></div>
+  <div class="grid-2">${visible.length?visible.map(t=>`<div class="card admin-ticket-card"><div class="row"><div><h3>${esc(t.subject)}</h3><div class="hint">${esc(t.name)} · @${esc(t.username)} · ${fmtDate(t.updatedAt)}</div></div><span class="ticket-status ${t.status}">${t.status==='closed'?'بسته':t.status==='answered'?'پاسخ داده شده':'باز'}</span></div><div class="ticket-thread" style="max-height:320px;overflow:auto">${t.messages.map(m=>`<div class="ticket-message ${m.sender==='admin'?'from-admin':''}"><div class="ticket-avatar">${m.sender==='admin'?'Y':'شما'}</div><div class="ticket-bubble"><div class="ticket-meta"><b>${esc(m.sender==='admin'?'مدیریت':m.senderName)}</b><small>${fmtDate(m.createdAt)}</small></div>${esc(m.body)}</div></div>`).join('')}</div><div class="row-actions">${t.status!=='closed'?`<button class="btn btn-sm btn-primary" onclick="replyTicket('${t.id}')">پاسخ</button><button class="btn btn-sm btn-ghost" onclick="closeTicket('${t.id}')">✓ بستن</button>`:`<span class="hint">سابقه گفتگو حفظ شده است.</span>`}<button class="btn btn-sm btn-danger" onclick="deleteTicketAdmin('${t.id}')">حذف تیکت</button></div></div>`).join(''):`<div class="empty-state">تیکتی وجود ندارد.</div>`}</div></div>`;
+}
 function adminRules(){
   return `
   <div class="card" style="margin-bottom:20px;">
@@ -1343,6 +1529,7 @@ function currentView(){
     case "login": return viewLogin();
     case "register": return viewRegister();
     case "profile": return viewProfile();
+    case "tickets": return viewTickets();
     case "admin": return viewAdmin();
     default: return viewHome();
   }
@@ -1380,6 +1567,16 @@ function demoBanner(){
 })();
 </script>
 
+<style id="ticket-css">
+.ticket-page{padding-bottom:70px}.ticket-hero{display:flex;justify-content:space-between;align-items:center;gap:30px;padding-top:52px;padding-bottom:30px}.ticket-title{font-size:42px;margin:4px 0 10px}.ticket-subtitle{color:var(--text-dim);max-width:650px;line-height:1.9}.ticket-orb{width:110px;height:110px;border-radius:30px;border:1px solid var(--border-strong);background:radial-gradient(circle at 30% 20%,rgba(96,140,255,.25),rgba(8,13,27,.9));display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:34px;box-shadow:0 20px 60px rgba(47,91,255,.18)}.ticket-orb span{font-size:9px;letter-spacing:3px;color:var(--text-faint);margin-top:6px}.ticket-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}.ticket-stat{padding:18px;border:1px solid var(--border);background:rgba(15,23,39,.72);border-radius:18px}.ticket-stat b{font-size:25px;display:block}.ticket-stat span{font-size:12px;color:var(--text-faint)}.ticket-layout{display:grid;grid-template-columns:.82fr 1.18fr;gap:18px;align-items:start}.ticket-compose{position:sticky;top:90px}.ticket-section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.ticket-section-head h3{margin:2px 0 0;font-size:20px}.ticket-kicker{font-size:10px;letter-spacing:2.5px;color:var(--blue-3);font-weight:700}.ticket-icon{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:rgba(47,91,255,.12);border:1px solid var(--border-strong)}.ticket-form{display:grid;gap:14px;margin-top:18px}.ticket-form label{display:grid;gap:7px;color:var(--text-dim);font-size:13px}.ticket-form input,.ticket-form textarea{width:100%;background:rgba(5,10,22,.7);color:var(--text);border:1px solid var(--border);border-radius:13px;padding:12px 14px;outline:none}.ticket-form textarea{min-height:180px;resize:vertical;line-height:1.8}.ticket-form input:focus,.ticket-form textarea:focus{border-color:var(--blue-3);box-shadow:0 0 0 3px rgba(47,91,255,.1)}.ticket-form-foot{display:grid;gap:10px}.ticket-note{font-size:11px;color:var(--text-faint);line-height:1.7}.ticket-submit{width:100%}.ticket-list{min-width:0}.ticket-card{background:linear-gradient(180deg,rgba(16,24,41,.92),rgba(8,13,24,.92));border:1px solid var(--border);border-radius:20px;padding:18px;margin-bottom:12px;box-shadow:0 16px 50px rgba(0,0,0,.18)}.ticket-card.is-answered{border-color:rgba(49,226,160,.25)}.ticket-card.is-closed{opacity:.75}.ticket-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.ticket-subject{font-weight:700;font-size:16px;margin-bottom:5px}.ticket-status{font-size:11px;padding:6px 10px;border-radius:999px;white-space:nowrap}.ticket-status.open{background:rgba(255,190,60,.1);color:#ffd56a}.ticket-status.answered{background:rgba(49,226,160,.1);color:#9df5d3}.ticket-status.closed{background:rgba(255,92,124,.1);color:#ffb3c2}.ticket-thread{display:grid;gap:10px;margin:16px 0}.ticket-message{display:flex;gap:9px;align-items:flex-start}.ticket-message.from-admin{flex-direction:row-reverse}.ticket-avatar{width:30px;height:30px;flex:0 0 30px;border-radius:10px;display:grid;place-items:center;font-size:9px;font-weight:700;background:rgba(96,140,255,.12);border:1px solid var(--border-strong);color:var(--blue-3)}.from-admin .ticket-avatar{background:rgba(49,226,160,.1);color:#9df5d3}.ticket-bubble{max-width:85%;padding:11px 13px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid var(--border);line-height:1.8;font-size:13px}.from-admin .ticket-bubble{background:rgba(49,226,160,.045);border-color:rgba(49,226,160,.18)}.ticket-meta{display:flex;justify-content:space-between;gap:15px;margin-bottom:5px}.ticket-meta small{color:var(--text-faint);font-size:9px}.ticket-empty{text-align:center;padding:50px 20px;border:1px dashed var(--border-strong);border-radius:20px;background:rgba(10,16,28,.5)}.ticket-empty-icon{font-size:35px;color:var(--blue-3);margin-bottom:10px}@media(max-width:900px){.ticket-layout{grid-template-columns:1fr}.ticket-compose{position:static}.ticket-stats{grid-template-columns:repeat(2,1fr)}.ticket-hero{padding-top:30px}.ticket-title{font-size:32px}}
+</style>
+<style id="admin-ticket-polish-css">
+.admin-ticket-mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 18px}.admin-ticket-mini{padding:16px 18px;border:1px solid var(--border);border-radius:16px;background:linear-gradient(180deg,rgba(18,27,47,.92),rgba(8,13,24,.9));box-shadow:0 14px 40px rgba(0,0,0,.12)}.admin-ticket-mini span{display:block;color:var(--text-faint);font-size:11px;margin-bottom:6px}.admin-ticket-mini b{font-size:24px}.admin-ticket-card{transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}.admin-ticket-card:hover{transform:translateY(-2px);border-color:var(--border-strong);box-shadow:0 18px 55px rgba(0,0,0,.2)}.admin-ticket-dashboard .section-head{margin-bottom:12px}@media(max-width:800px){.admin-ticket-mini-stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+<style id="admin-ticket-css">
+.admin-ticket-banner{display:flex;justify-content:space-between;align-items:center;gap:18px}.admin-send-ticket{margin-top:18px}.admin-ticket-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.admin-ticket-form-grid label{display:grid;gap:7px;font-size:13px;color:var(--text-dim)}.admin-ticket-form-grid input,.admin-ticket-form-grid select,.admin-ticket-form-grid textarea{width:100%;background:rgba(5,10,22,.7);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:11px 13px}.admin-ticket-form-grid textarea{min-height:130px;resize:vertical;line-height:1.8}.admin-ticket-form-grid .full{grid-column:1/-1}.admin-ticket-card{min-width:0}.admin-ticket-dashboard .ticket-status{display:inline-flex}
+@media(max-width:800px){.admin-ticket-form-grid{grid-template-columns:1fr}.admin-ticket-form-grid .full{grid-column:auto}.admin-ticket-banner{align-items:flex-start;flex-direction:column}}
+</style>
 <style id="embedded-admin-css">
 .admin-overlay{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.86);backdrop-filter:blur(8px);overflow:auto;padding:20px}
 .admin-overlay iframe{display:block;width:100%;height:calc(100vh - 40px);max-width:1600px;margin:auto;border:1px solid #263149;border-radius:20px;background:#080b12;box-shadow:0 30px 100px rgba(0,0,0,.6)}
@@ -1422,3 +1619,8 @@ document.addEventListener("keydown",function(e){
 </script>
 </body>
 </html>
+
+<script>
+setInterval(()=>{ if(STATE && STATE.user && STATE.route !== "join") refreshMyStatus(); }, 10000);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && STATE && STATE.user) refreshMyStatus(); });
+</script>

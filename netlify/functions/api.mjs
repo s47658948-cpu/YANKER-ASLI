@@ -191,6 +191,25 @@ export async function handler(event) {
       return reply(200, { ok: true, member: mapMember(rows[0], false) });
     }
 
+    // User login works across devices by checking the persistent member/request records.
+    // This is a fallback for accounts whose old localStorage user record is missing.
+    if (event.httpMethod === "POST" && action === "user-login") {
+      const username = normalizeUsername(body.username);
+      const passwordHash = crypto.createHash("sha256").update(String(body.password || "")).digest("hex");
+      if (!username || !passwordHash) return reply(400, { ok:false, error:"اطلاعات ورود کامل نیست." });
+      const members = await db(`members?username=eq.${encodeURIComponent(username)}&password_hash=eq.${encodeURIComponent(passwordHash)}&limit=1`);
+      if (members?.length) {
+        const m = members[0];
+        return reply(200, { ok:true, user:{ username:m.username, displayName:m.name || m.username, role:"member" }, member:mapMember(m,false) });
+      }
+      const requests = await db(`requests?username=eq.${encodeURIComponent(username)}&password_hash=eq.${encodeURIComponent(passwordHash)}&order=created_at.desc&limit=1`);
+      if (requests?.length) {
+        const r = requests[0];
+        return reply(200, { ok:true, user:{ username:r.username, displayName:r.name || r.username, role:"user" }, request:mapRequest(r) });
+      }
+      return reply(401, { ok:false, error:"نام کاربری یا رمز عبور اشتباه است." });
+    }
+
     if (event.httpMethod === "GET" && action === "members") return reply(200, { ok: true, members: await getMembers() });
 
     if (event.httpMethod === "GET" && action === "announcements") return reply(200, { ok: true, announcements: await getAnnouncements() });

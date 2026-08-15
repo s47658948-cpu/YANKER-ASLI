@@ -1,10 +1,15 @@
-نسخه نهایی اصلاح‌شده Yanker
+YANKER — Supabase persistent version
 
-اصلاحات:
-1) اطلاعات حساب کاربر با localStorage مرورگر حفظ می‌شود و بعد از رفرش/ورود مجدد ناپدید نمی‌شود.
-2) فرم درخواست عضویت دیگر به خاطر نبودن password در request خطای «اطلاعات ضروری کامل نیست» نمی‌دهد.
-3) passwordHash کاربر همراه درخواست ارسال و هنگام تأیید عضو ذخیره می‌شود.
-4) Netlify Blobs در این نسخه استفاده نمی‌شود.
+Netlify Environment Variables:
+SUPABASE_URL=https://tlesdaccxwdwxrwlsxsb.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<your NEW rotated secret key>
+ADMIN_USER=owner
+ADMIN_PASSWORD=<your admin password>
+SESSION_SECRET=<a long random secret>
 
-نکته:
-این نسخه برای حساب‌های کاربری سمت مرورگر از localStorage استفاده می‌کند؛ بنابراین اطلاعات حساب روی همان مرورگر/دستگاه حفظ می‌شود. برای احراز هویت چنددستگاهی و ذخیره‌سازی دائمی، بعداً باید دیتابیس/Netlify Blobs واقعی اضافه شود.
+Do NOT put SUPABASE_SERVICE_ROLE_KEY in HTML or client-side JavaScript.
+
+The SQL schema must be created in Supabase SQL Editor before deploying.
+
+
+نسخه فعلی: حذف درخواست عضویت از پنل مدیریت اضافه شده است. حذف درخواست فقط خود درخواست را حذف می‌کند و عضو تأییدشده را حذف نمی‌کند.
